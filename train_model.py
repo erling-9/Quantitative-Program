@@ -9,8 +9,6 @@ import pandas as pd
 import numpy as np
 from lightgbm import LGBMClassifier
 from sklearn import svm
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
 import pickle
 
 pd.set_option("display.max_rows", 1000)
@@ -33,7 +31,7 @@ class XYZ_Meta():
         self.lgbm_unbalance_ratio = 5
         
         self.transaction_cost_ksvm_filter = 0.002
-        self.ksvm_gamma = 0.2
+        self.ksvm_gamma = 0.4
         self.ksvm_unbalance_ratio = 5
 
     def utility_function(self, sequence, transaction_cost):
@@ -86,17 +84,17 @@ class XYZ_Meta():
         i_down = np.argmax(utility_down)
         
         if np.max(utility_up) > np.max(utility_down):
-            Y_filter = Y
+            Y_filter = Y.copy()
             Y_filter.loc[W < c_up[i_up]] = 0
             uti_temp, sharpe_ratio_trade, ave_ann_return, ave_ann_return_per_trade = self.utility_function(Y_filter, self.transaction_cost_Y)
             return c_up[i_up], grid_up[i_up], 1, sharpe_ratio_trade, ave_ann_return, ave_ann_return_per_trade, Y_filter
         else:
-            Y_filter = Y
+            Y_filter = Y.copy()
             Y_filter.loc[W > c_down[i_down]] = 0
             uti_temp, sharpe_ratio_trade, ave_ann_return, ave_ann_return_per_trade = self.utility_function(Y_filter, self.transaction_cost_Y)
             return c_down[i_down], grid_down[i_down], -1, sharpe_ratio_trade, ave_ann_return, ave_ann_return_per_trade, Y_filter
 
-    def LGBM_filter_Weighted(self, Y, W, unbalance_ratio):
+    def LGBM_filter_Weighted(self, Y, W):
         lgbm = LGBMClassifier(
             learning_rate=self.lgbm_learning_rate, 
             min_child_samples=self.lgbm_min_child_samples, 
@@ -104,23 +102,18 @@ class XYZ_Meta():
             verbose=-1
         )
         label = np.sign(Y - self.transaction_cost_Y)
-        weight = abs(np.multiply(Y - self.transaction_cost_Y, (label - (self.lgbm_unbalance_ratio - 1) / (1 + self.lgbm_unbalance_ratio))))
+        weight = abs(np.multiply(Y - self.transaction_cost_Y, 
+                                 (label - (self.lgbm_unbalance_ratio - 1) / (1 + self.lgbm_unbalance_ratio))))
         lgbm.fit(W, label, sample_weight=weight.values.reshape(-1))
         return lgbm
     
-    def Kernel_SVM_Weighted(self, Y, W, unbalance_ratio):
+    def Kernel_SVM_Weighted(self, Y, W):
         clf = svm.SVC(kernel=self.kernel, gamma=self.ksvm_gamma, probability=True, random_state=42)
-    
-        label = np.sign(Y - self.transaction_cost_Y)
-        weight = abs(np.multiply(Y - self.transaction_cost_Y, (label - (self.ksvm_unbalance_ratio - 1) / (1 + self.ksvm_unbalance_ratio))))
-    
-        # 确保权重格式正确
-        sample_weight = weight.values.reshape(-1) if hasattr(weight, 'values') else weight.reshape(-1)
-    
-        pipeline = Pipeline([('scaler', StandardScaler()),('svm', clf)])
-    
-        pipeline.fit(W, label, svm__sample_weight=sample_weight)
-        return pipeline
+        label = np.sign(Y - self.transaction_cost_Y)  # compared with NO-trading
+        unbalance_ratio = self.ksvm_unbalance_ratio
+        weight = abs(np.multiply(Y - self.transaction_cost_Y, (label - (unbalance_ratio - 1) / (1 + unbalance_ratio))))
+        clf.fit(W, label, sample_weight=weight)
+        return clf
 
     def summarizePrint(self, sequence):
         sequence1 = sequence.loc[sequence.values.reshape(-1) != 0]
@@ -143,12 +136,12 @@ class XYZ_Meta():
             'percent_of_trade': percent_of_trade
         }
 
-def train_final_model(W, Y, model_type, unbalance_ratio, XYZ_Model):
+def train_final_model(W, Y, model_type, XYZ_Model):
     """训练单个模型"""
     if model_type == "LGBM":
-        model_temp = XYZ_Model.LGBM_filter_Weighted(Y, W, unbalance_ratio)
+        model_temp = XYZ_Model.LGBM_filter_Weighted(Y, W)
     elif model_type == "KSVM":
-        model_temp = XYZ_Model.Kernel_SVM_Weighted(Y, W, unbalance_ratio)
+        model_temp = XYZ_Model.Kernel_SVM_Weighted(Y, W)
     else:
         raise ValueError("Model type must be 'LGBM' or 'KSVM'")
     
@@ -161,10 +154,10 @@ def train_final_model(W, Y, model_type, unbalance_ratio, XYZ_Model):
     
     return model_temp, cut_off, sig, summary
 
-def train_final_two_sides_models(W, Y, model_type, unbalance_ratio, XYZ_Model):
+def train_final_two_sides_models(W, Y, model_type, XYZ_Model):
     """训练双向模型（做多和做空）"""
-    model_long, cutoff_long, sig_long, summary_long = train_final_model(W, Y, model_type, unbalance_ratio, XYZ_Model)
-    model_short, cutoff_short, sig_short, summary_short = train_final_model(W, -Y, model_type, unbalance_ratio, XYZ_Model)
+    model_long, cutoff_long, sig_long, summary_long = train_final_model(W, Y, model_type, XYZ_Model)
+    model_short, cutoff_short, sig_short, summary_short = train_final_model(W, -Y, model_type, XYZ_Model)
     
     return model_long, model_short, cutoff_long, cutoff_short, summary_long, summary_short
 
@@ -213,13 +206,13 @@ def train_models_from_excel(excel_path, startTime='0400', endTime='0929', unbala
     print("\n1. 训练LightGBM模型...")
     XYZ_Model_lgbm = XYZ_Meta()
     model_long_lgbm, model_short_lgbm, cutoff_long_lgbm, cutoff_short_lgbm, summary_long_lgbm, summary_short_lgbm = train_final_two_sides_models(
-        W_all, Y_all, 'LGBM', unbalance_ratio, XYZ_Model_lgbm)
+        W_all, Y_all, 'LGBM', XYZ_Model_lgbm)
     
     # 训练KSVM模型  
     print("\n2. 训练KSVM模型...")
     XYZ_Model_ksvm = XYZ_Meta()
     model_long_ksvm, model_short_ksvm, cutoff_long_ksvm, cutoff_short_ksvm, summary_long_ksvm, summary_short_ksvm = train_final_two_sides_models(
-        W_all, Y_all, 'KSVM', unbalance_ratio, XYZ_Model_ksvm)
+        W_all, Y_all, 'KSVM', XYZ_Model_ksvm)
     
     # 构建返回结果
     model_dict = {

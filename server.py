@@ -79,7 +79,7 @@ def predict_signal(features):
     prob_long_ksvm = model_dict['model_long_ksvm'].predict_proba(features_array.reshape(1, -1))[0, 1]
     prob_short_ksvm = model_dict['model_short_ksvm'].predict_proba(features_array.reshape(1, -1))[0, 1]
     
-    # 决策逻辑
+    # 决策逻辑（匹配 predict.py）
     long_decision_lgbm = 1 if prob_long_lgbm >= model_dict['cutoff_long_lgbm'] else 0
     short_decision_lgbm = -1 if prob_short_lgbm >= model_dict['cutoff_short_lgbm'] else 0
     long_decision_ksvm = 1 if prob_long_ksvm >= model_dict['cutoff_long_ksvm'] else 0
@@ -89,18 +89,14 @@ def predict_signal(features):
     lgbm_votes = long_decision_lgbm + short_decision_lgbm 
     ksvm_votes = long_decision_ksvm + short_decision_ksvm
 
-    if lgbm_votes == 1 and ksvm_votes == 1:
+    if lgbm_votes + ksvm_votes == 2:
         decision = 1.5
-    elif lgbm_votes == -1 and ksvm_votes == -1:
+    elif lgbm_votes + ksvm_votes == -2:
         decision = -1.5
-    elif lgbm_votes == 1 and ksvm_votes == -1:
-        decision = 0.5
-    elif lgbm_votes == -1 and ksvm_votes == 1:
-        decision = -0.5
-    elif lgbm_votes == 1 and ksvm_votes == 0:
-        decision = 1
-    elif lgbm_votes == -1 and ksvm_votes == 0:
+    elif lgbm_votes + ksvm_votes == -1:
         decision = -1
+    elif lgbm_votes + ksvm_votes == 1:
+        decision = 1
     else:
         decision = 0
     
@@ -110,6 +106,10 @@ def predict_signal(features):
         'prob_short_lgbm': float(prob_short_lgbm),
         'prob_long_ksvm': float(prob_long_ksvm),
         'prob_short_ksvm': float(prob_short_ksvm),
+        'threshold_long_lgbm': float(model_dict['cutoff_long_lgbm']),
+        'threshold_short_lgbm': float(model_dict['cutoff_short_lgbm']),
+        'threshold_long_ksvm': float(model_dict['cutoff_long_ksvm']),
+        'threshold_short_ksvm': float(model_dict['cutoff_short_ksvm']),
         'long_decision_lgbm': int(long_decision_lgbm),
         'short_decision_lgbm': int(short_decision_lgbm),
         'long_decision_ksvm': int(long_decision_ksvm),

@@ -254,10 +254,10 @@ const resultDetails = computed(() => {
   const { decision, ...rest } = result.value;
   return {
     决策权重: decision,
-    'LGBM看多概率': (rest.prob_long_lgbm * 100).toFixed(2) + '%',
-    'LGBM看空概率': (rest.prob_short_lgbm * 100).toFixed(2) + '%',
-    'KSVM看多概率': (rest.prob_long_ksvm * 100).toFixed(2) + '%',
-    'KSVM看空概率': (rest.prob_short_ksvm * 100).toFixed(2) + '%',
+    'LGBM看多概率': (rest.prob_long_lgbm * 100).toFixed(2) + '% (阈值: ' + (rest.threshold_long_lgbm * 100).toFixed(2) + '%)',
+    'LGBM看空概率': (rest.prob_short_lgbm * 100).toFixed(2) + '% (阈值: ' + (rest.threshold_short_lgbm * 100).toFixed(2) + '%)',
+    'KSVM看多概率': (rest.prob_long_ksvm * 100).toFixed(2) + '% (阈值: ' + (rest.threshold_long_ksvm * 100).toFixed(2) + '%)',
+    'KSVM看空概率': (rest.prob_short_ksvm * 100).toFixed(2) + '% (阈值: ' + (rest.threshold_short_ksvm * 100).toFixed(2) + '%)',
   };
 });
 

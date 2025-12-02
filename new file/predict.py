@@ -42,26 +42,21 @@ def predict_signal_with_debug(features):
     lgbm_votes = long_decision_lgbm + short_decision_lgbm 
     ksvm_votes = long_decision_ksvm + short_decision_ksvm
 
-    if lgbm_votes == 1 and ksvm_votes == 1:
+    if lgbm_votes + ksvm_votes == 2:
         decision = 1.5
-    elif lgbm_votes == -1 and ksvm_votes == -1:
+    elif lgbm_votes + ksvm_votes == -2:
         decision = -1.5
-    elif lgbm_votes == 1 and ksvm_votes == -1:
-        decision = 0.5
-    elif lgbm_votes == -1 and ksvm_votes == 1:
-        decision = -0.5
-    elif lgbm_votes == 1 and ksvm_votes == 0:
-        decision = 1
-    elif lgbm_votes == -1 and ksvm_votes == 0:
+    elif lgbm_votes + ksvm_votes == -1:
         decision = -1
+    elif lgbm_votes + ksvm_votes == 1:
+        decision = 1
     else:
         decision = 0
 
     return decision
 
 # 使用示例
-features_today = [0.002570,-0.000056,0.000392,-0.005141
-]
+features_today = [0.004585,-0.000418,-0.000425,-0.001264]
 signal_today = predict_signal_with_debug
 signal_today = predict_signal_with_debug(features_today)  # 调用函数并传入参数
 print(signal_today)  # 打印函数的返回值
