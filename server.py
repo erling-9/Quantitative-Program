@@ -13,6 +13,8 @@ import os
 import sys
 import pickle
 from werkzeug.utils import secure_filename
+import json
+import uuid
 
 # 导入训练模块
 from train_model import train_models_from_excel
@@ -24,9 +26,12 @@ CORS(app)  # 允许跨域请求
 UPLOAD_FOLDER = 'uploads'
 MODEL_FILE = 'trading_models.pkl'
 ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+LOG_DIR = 'logs'
+LOG_FILE = os.path.join(LOG_DIR, 'prediction_logs.jsonl')
 
-# 确保上传文件夹存在
+# 确保上传文件夹和日志目录存在
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -60,6 +65,25 @@ def load_models():
         import traceback
         traceback.print_exc()
         return False
+
+
+def append_predict_log(factors, result, request_obj):
+    """将预测调用记录到本地 jsonl 日志文件，便于后续前端展示"""
+    record = {
+        "id": str(uuid.uuid4()),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "client_ip": request_obj.remote_addr,
+        "user_agent": request_obj.headers.get("User-Agent"),
+        "factors": factors,
+        "result": result,
+    }
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        # 不影响主流程，打印到 stderr 便于排查
+        print(f"写入预测日志失败: {e}", file=sys.stderr)
 
 def predict_signal(features):
     """使用训练好的模型进行预测"""
@@ -211,6 +235,7 @@ def predict():
         
         # 进行预测
         result = predict_signal(feature_values)
+        append_predict_log(factors=data.get("factors", []), result=result, request_obj=request)
         
         return jsonify(result), 200
         
@@ -221,6 +246,35 @@ def predict():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'服务器内部错误: {str(e)}'}), 500
+
+
+@app.route('/logs', methods=['GET'])
+def get_logs():
+    """获取预测调用日志，默认返回当天的记录"""
+    date_str = request.args.get(
+        'date', datetime.utcnow().strftime("%Y-%m-%d"))
+    limit = int(request.args.get('limit', 200))
+    records = []
+
+    if not os.path.exists(LOG_FILE):
+        return jsonify({"logs": [], "date": date_str}), 200
+
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    item = json.loads(line)
+                    if item.get("date") == date_str:
+                        records.append(item)
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        return jsonify({"error": f"读取日志失败: {str(e)}"}), 500
+
+    records = sorted(records, key=lambda x: x.get("timestamp", ""), reverse=True)
+    if limit > 0:
+        records = records[:limit]
+    return jsonify({"logs": records, "date": date_str}), 200
 
 @app.route('/health', methods=['GET'])
 def health():

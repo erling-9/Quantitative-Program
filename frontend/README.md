@@ -1,8 +1,9 @@
-# 交易信号前端
+# 交易信号前端 (Trading Signal Frontend)
 
-一个使用 Vue 3 + Vite 构建的简易界面，用于录入四个因子并展示交易信号结果。
+一个使用 Vue 3 + Vite 构建的简易界面，用于录入四个因子并展示交易信号结果。  
+A simple UI built with Vue 3 + Vite to input four factors and display trading signals.
 
-## 快速开始
+## 快速开始 (Quick Start)
 
 ```bash
 cd frontend
@@ -10,15 +11,17 @@ npm install
 npm run dev
 ```
 
-默认服务地址为 `http://127.0.0.1:8000/predict`，可通过在根目录创建 `.env` 或 `.env.local` 覆盖：
+默认服务地址为 `http://127.0.0.1:8000/predict`，可通过在根目录创建 `.env` 或 `.env.local` 覆盖：  
+Default endpoint is `http://127.0.0.1:8000/predict`; override via `.env` or `.env.local`:
 
 ```bash
 VITE_SIGNAL_ENDPOINT=https://your-server.example.com/predict
 ```
 
-## 请求格式
+## 请求格式 (Request Payload)
 
-前端会向后端发送如下结构的请求：
+前端会向后端发送如下结构的请求：  
+Frontend sends payload like:
 
 ```json
 {
@@ -31,7 +34,8 @@ VITE_SIGNAL_ENDPOINT=https://your-server.example.com/predict
 }
 ```
 
-后端应返回类似结构：
+后端应返回类似结构：  
+Backend should return payload like:
 
 ```json
 {
@@ -43,6 +47,8 @@ VITE_SIGNAL_ENDPOINT=https://your-server.example.com/predict
 }
 ```
 
-- `decision`：建议仓位，1.5 表示多头加杠杆，1 表示普通多头，-1.5/-1 表示空头，0 表示观望。
-- 其余字段会被展示在结果面板里，可根据实际返回字段增减。
+- `decision`：建议仓位，1.5 表示多头加杠杆，1 表示普通多头，-1.5/-1 表示空头，0 表示观望。  
+  `decision`: suggested position; 1.5 double long, 1 long, -1.5/-1 short, 0 flat.
+- 其余字段会被展示在结果面板里，可根据实际返回字段增减。  
+  Other fields are shown in the result panel; adjust as your API returns.
 
