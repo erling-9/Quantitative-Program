@@ -1,0 +1,99 @@
+==========================================
+QuantitativeProgram 快速部署命令清单
+==========================================
+
+【前提】确保代码已推送到 GitHub 仓库
+
+==========================================
+一、在服务器上执行（按顺序执行）
+==========================================
+
+# 1. 安装系统依赖
+sudo apt-get update
+sudo apt-get install -y python3 python3-pip python3-venv git nginx
+
+# 2. 克隆代码
+sudo mkdir -p /opt/quantitative-program
+cd /opt/quantitative-program
+sudo git clone https://github.com/erling-9/Quantitative-Program.git .
+
+# 3. 创建虚拟环境并安装依赖
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install gunicorn
+
+# 4. 创建必要目录
+mkdir -p uploads logs
+
+# 5. 创建 systemd 服务文件
+sudo nano /etc/systemd/system/quantitative-program.service
+
+# 粘贴以下内容（注意修改路径）：
+# [Unit]
+# Description=Quantitative Program Trading Signal Server
+# After=network.target
+# 
+# [Service]
+# Type=notify
+# User=root
+# WorkingDirectory=/opt/quantitative-program
+# Environment="PATH=/opt/quantitative-program/venv/bin"
+# ExecStart=/opt/quantitative-program/venv/bin/gunicorn --bind 0.0.0.0:8000 --workers 4 --timeout 300 --config /opt/quantitative-program/gunicorn_config.py server:app
+# Restart=always
+# RestartSec=10
+# 
+# [Install]
+# WantedBy=multi-user.target
+
+# 6. 设置权限
+sudo chown -R root:root /opt/quantitative-program
+
+# 7. 启动服务
+sudo systemctl daemon-reload
+sudo systemctl enable quantitative-program
+sudo systemctl start quantitative-program
+sudo systemctl status quantitative-program
+
+# 8. 配置防火墙
+sudo ufw allow 8000/tcp
+sudo ufw allow 80/tcp
+
+# 9. 测试
+curl http://localhost:8000/health
+
+==========================================
+二、配置 Nginx（可选）
+==========================================
+
+# 1. 创建配置文件
+sudo nano /etc/nginx/sites-available/quantitative-program
+
+# 粘贴 nginx.conf 的内容，修改 server_name
+
+# 2. 启用配置
+sudo ln -s /etc/nginx/sites-available/quantitative-program /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+
+==========================================
+三、常用管理命令
+==========================================
+
+# 查看状态
+sudo systemctl status quantitative-program
+
+# 重启服务
+sudo systemctl restart quantitative-program
+
+# 查看日志
+sudo journalctl -u quantitative-program -f
+
+# 更新代码
+cd /opt/quantitative-program
+sudo git pull
+sudo systemctl restart quantitative-program
+
+==========================================
+
