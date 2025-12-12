@@ -167,8 +167,8 @@ def train():
         
         # 获取训练参数（可选）
         startTime = request.form.get('startTime', '0400')
-        endTime = request.form.get('endTime', '0929')
-        unbalance_ratio = float(request.form.get('unbalance_ratio', 5))
+        endTime = request.form.get('endTime', 'mid')
+        unbalance_ratio = float(request.form.get('unbalance_ratio', 5))  # 保留参数以保持向后兼容，但不再使用
         
         # 训练模型
         print("开始训练模型...")
