@@ -1,0 +1,89 @@
+name: 自动部署到服务器
+
+on:
+  push:
+    branches:
+      - main      # 推送到 main 分支时触发
+      - master    # 推送到 master 分支时触发
+
+jobs:
+  deploy:
+    name: 部署到生产服务器
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 检查代码
+        uses: actions/checkout@v4
+      
+      - name: 配置 SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: 部署到服务器
+        run: |
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'ENDSSH'
+            set -e
+            echo "=========================================="
+            echo "开始自动部署 QuantitativeProgram"
+            echo "时间: $(date)"
+            echo "=========================================="
+            
+            # 进入部署目录
+            DEPLOY_DIR="/opt/quantitative-program"
+            if [ ! -d "$DEPLOY_DIR" ]; then
+              echo "错误: 部署目录不存在: $DEPLOY_DIR"
+              exit 1
+            fi
+            
+            cd "$DEPLOY_DIR"
+            
+            # 获取当前分支名
+            CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+            echo "当前分支: $CURRENT_BRANCH"
+            
+            # 拉取最新代码
+            echo "拉取最新代码..."
+            git fetch origin
+            git reset --hard origin/${{ github.ref_name }} || git reset --hard origin/main || git reset --hard origin/master
+            
+            # 检查是否有新的依赖需要安装
+            if [ -f requirements.txt ]; then
+              echo "检查 Python 依赖..."
+              if [ -d "venv" ]; then
+                source venv/bin/activate
+                pip install -r requirements.txt --quiet --upgrade
+              else
+                echo "警告: 虚拟环境不存在，跳过依赖安装"
+              fi
+            fi
+            
+            # 重启服务
+            echo "重启服务..."
+            if sudo systemctl is-active --quiet quantitative-program; then
+              sudo systemctl restart quantitative-program
+              echo "服务已重启"
+            else
+              echo "警告: 服务未运行，尝试启动..."
+              sudo systemctl start quantitative-program || true
+            fi
+            
+            # 等待服务启动
+            sleep 3
+            
+            # 检查服务状态
+            echo "检查服务状态..."
+            if sudo systemctl is-active --quiet quantitative-program; then
+              echo "✓ 服务运行正常"
+              sudo systemctl status quantitative-program --no-pager -l || true
+            else
+              echo "✗ 服务未运行，请检查日志"
+              sudo systemctl status quantitative-program --no-pager -l || true
+              exit 1
+            fi
+            
+            echo "=========================================="
+            echo "部署完成！"
+            echo "=========================================="
+          ENDSSH
+

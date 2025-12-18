@@ -39,24 +39,41 @@ def allowed_file(filename):
 # 全局变量存储模型
 models_loaded = False
 model_dict = None
+_model_file_mtime = None  # 记录模型文件的最后修改时间
 
-def load_models():
-    """从pkl文件加载模型"""
-    global models_loaded, model_dict
+def load_models(force_reload=False):
+    """从pkl文件加载模型
     
-    if models_loaded and model_dict is not None:
-        return True
+    Args:
+        force_reload: 是否强制重新加载，忽略缓存
+    """
+    global models_loaded, model_dict, _model_file_mtime
     
     try:
         if not os.path.exists(MODEL_FILE):
             print(f"模型文件 {MODEL_FILE} 不存在，请先训练模型")
+            models_loaded = False
+            model_dict = None
             return False
         
+        # 检查文件修改时间，如果文件更新了，强制重新加载
+        current_mtime = os.path.getmtime(MODEL_FILE)
+        if not force_reload and models_loaded and model_dict is not None:
+            if _model_file_mtime is not None and current_mtime == _model_file_mtime:
+                # 文件未更新，且模型已加载，直接返回
+                return True
+            elif _model_file_mtime is not None and current_mtime != _model_file_mtime:
+                # 文件已更新，需要重新加载
+                print(f"检测到模型文件已更新，重新加载模型...")
+                force_reload = True
+        
+        # 加载模型
         print("正在加载模型...")
         with open(MODEL_FILE, 'rb') as f:
             model_dict = pickle.load(f)
         
         models_loaded = True
+        _model_file_mtime = current_mtime
         print("模型加载完成！")
         return True
         
@@ -64,6 +81,8 @@ def load_models():
         print(f"加载模型时出错: {e}")
         import traceback
         traceback.print_exc()
+        models_loaded = False
+        model_dict = None
         return False
 
 
@@ -183,8 +202,13 @@ def train():
         with open(MODEL_FILE, 'wb') as f:
             pickle.dump(model_dict, f)
         
+        # 更新全局变量（当前 worker 进程）
         models_loaded = True
+        global _model_file_mtime
+        _model_file_mtime = os.path.getmtime(MODEL_FILE)
         print("模型训练完成并已保存")
+        
+        # 注意：其他 worker 进程会在下次预测时自动检测到文件更新并重新加载
         
         # 清理上传的文件
         try:
@@ -228,10 +252,9 @@ def predict():
                 return jsonify({'error': '每个因子需要包含 name 和 value 字段'}), 400
             feature_values.append(float(factor['value']))
         
-        # 确保模型已加载
-        if not models_loaded:
-            if not load_models():
-                return jsonify({'error': '模型未加载，请先训练模型'}), 500
+        # 确保模型已加载（每次预测前都检查模型文件是否更新）
+        if not load_models(force_reload=False):
+            return jsonify({'error': '模型未加载，请先训练模型'}), 500
         
         # 进行预测
         result = predict_signal(feature_values)
