@@ -15,6 +15,7 @@ import pickle
 from werkzeug.utils import secure_filename
 import json
 import uuid
+import time
 
 # 导入训练模块
 from train_model import train_models_from_excel
@@ -49,36 +50,55 @@ def load_models(force_reload=False):
     """
     global models_loaded, model_dict, _model_file_mtime
     
+    # 获取进程 ID，用于调试多进程问题
+    import os as os_module
+    pid = os_module.getpid()
+    
     try:
         if not os.path.exists(MODEL_FILE):
-            print(f"模型文件 {MODEL_FILE} 不存在，请先训练模型")
+            print(f"[DEBUG PID={pid}] 模型文件 {MODEL_FILE} 不存在，请先训练模型")
             models_loaded = False
             model_dict = None
             return False
         
         # 检查文件修改时间，如果文件更新了，强制重新加载
         current_mtime = os.path.getmtime(MODEL_FILE)
+        current_mtime_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_mtime))
+        
+        print(f"[DEBUG PID={pid}] load_models 调用: force_reload={force_reload}, models_loaded={models_loaded}, _model_file_mtime={_model_file_mtime}")
+        print(f"[DEBUG PID={pid}] 当前模型文件修改时间: {current_mtime} ({current_mtime_str})")
+        
         if not force_reload and models_loaded and model_dict is not None:
             if _model_file_mtime is not None and current_mtime == _model_file_mtime:
                 # 文件未更新，且模型已加载，直接返回
+                print(f"[DEBUG PID={pid}] 模型文件未更新，使用内存中的模型 (mtime={current_mtime})")
                 return True
             elif _model_file_mtime is not None and current_mtime != _model_file_mtime:
                 # 文件已更新，需要重新加载
-                print(f"检测到模型文件已更新，重新加载模型...")
+                old_mtime_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(_model_file_mtime))
+                print(f"[DEBUG PID={pid}] ⚠️ 检测到模型文件已更新！")
+                print(f"[DEBUG PID={pid}]   旧时间: {_model_file_mtime} ({old_mtime_str})")
+                print(f"[DEBUG PID={pid}]   新时间: {current_mtime} ({current_mtime_str})")
+                print(f"[DEBUG PID={pid}]   强制重新加载模型...")
                 force_reload = True
         
         # 加载模型
-        print("正在加载模型...")
+        print(f"[DEBUG PID={pid}] 正在加载模型...")
         with open(MODEL_FILE, 'rb') as f:
             model_dict = pickle.load(f)
         
         models_loaded = True
         _model_file_mtime = current_mtime
-        print("模型加载完成！")
+        print(f"[DEBUG PID={pid}] ✅ 模型加载完成！mtime={current_mtime} ({current_mtime_str})")
+        
+        # 记录模型的一些关键信息用于调试
+        if model_dict and 'cutoff_long_lgbm' in model_dict:
+            print(f"[DEBUG PID={pid}] 模型信息: cutoff_long_lgbm={model_dict.get('cutoff_long_lgbm', 'N/A')}")
+        
         return True
         
     except Exception as e:
-        print(f"加载模型时出错: {e}")
+        print(f"[DEBUG PID={pid}] ❌ 加载模型时出错: {e}")
         import traceback
         traceback.print_exc()
         models_loaded = False
@@ -206,9 +226,12 @@ def train():
         models_loaded = True
         global _model_file_mtime
         _model_file_mtime = os.path.getmtime(MODEL_FILE)
-        print("模型训练完成并已保存")
-        
-        # 注意：其他 worker 进程会在下次预测时自动检测到文件更新并重新加载
+        mtime_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(_model_file_mtime))
+        pid = os.getpid()
+        print(f"[DEBUG PID={pid}] ✅ 模型训练完成并已保存")
+        print(f"[DEBUG PID={pid}]   文件路径: {MODEL_FILE}")
+        print(f"[DEBUG PID={pid}]   文件修改时间: {_model_file_mtime} ({mtime_str})")
+        print(f"[DEBUG PID={pid}]   当前进程已更新模型，其他 worker 进程会在下次预测时自动检测并重新加载")
         
         # 清理上传的文件
         try:
@@ -253,11 +276,21 @@ def predict():
             feature_values.append(float(factor['value']))
         
         # 确保模型已加载（每次预测前都检查模型文件是否更新）
+        pid = os.getpid()
+        print(f"[DEBUG PID={pid}] /predict 请求: 开始预测")
+        print(f"[DEBUG PID={pid}]   输入特征: {feature_values}")
+        
         if not load_models(force_reload=False):
             return jsonify({'error': '模型未加载，请先训练模型'}), 500
         
+        # 记录当前使用的模型信息
+        if model_dict and 'cutoff_long_lgbm' in model_dict:
+            print(f"[DEBUG PID={pid}] 预测时使用的模型: cutoff_long_lgbm={model_dict.get('cutoff_long_lgbm', 'N/A')}")
+            print(f"[DEBUG PID={pid}] 模型文件修改时间: {_model_file_mtime}")
+        
         # 进行预测
         result = predict_signal(feature_values)
+        print(f"[DEBUG PID={pid}] 预测结果: decision={result.get('decision', 'N/A')}")
         append_predict_log(factors=data.get("factors", []), result=result, request_obj=request)
         
         return jsonify(result), 200
