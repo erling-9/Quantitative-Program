@@ -56,7 +56,8 @@ def predict_signal_with_debug(features):
     return decision
 
 # 使用示例
-features_today = [0.004585,-0.000418,-0.000425,-0.001264]
+features_today = [0.0005344735,-0.0008069924,-0.0010417037,-0.0119747982
+]
 signal_today = predict_signal_with_debug
 signal_today = predict_signal_with_debug(features_today)  # 调用函数并传入参数
 print(signal_today)  # 打印函数的返回值

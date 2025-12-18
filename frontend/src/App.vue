@@ -279,7 +279,8 @@ const handleTrain = async () => {
     const formData = new FormData();
     formData.append('file', selectedFile.value);
     formData.append('startTime', '0400');
-    formData.append('endTime', '0929');
+    // 与 new file 中的 buildmodel(2).py 保持一致，使用 'mid'
+    formData.append('endTime', 'mid');
     formData.append('unbalance_ratio', '5');
 
     const response = await axios.post(trainEndpoint, formData, {

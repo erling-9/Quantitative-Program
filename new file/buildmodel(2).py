@@ -185,7 +185,7 @@ def train_final_two_sides_models(W, Y, model_type, XYZ_Model):
 print("开始训练交易模型...")
 
 # 读取数据
-xyzReturnsFinal = pd.read_excel("datay.xlsx")
+xyzReturnsFinal = pd.read_excel("datax.xlsx")
 xyzReturnsFinal = xyzReturnsFinal.sort_values(by='date_day', ascending=True)
 numericalVars = [x for x in xyzReturnsFinal.columns if ('date' not in x) and ('Date' not in x)]
 xyzReturnsFinal[numericalVars] = xyzReturnsFinal[numericalVars].astype(float)
@@ -196,7 +196,7 @@ print('总天数: %s' % len(xyzReturnsFinal['date_day'].unique()))
 
 # 设置参数
 startTime = '0400'
-endTime = '0929'
+endTime = 'mid'
 print('开始时间: %s, 结束时间: %s' % (startTime, endTime))
 
 varY = 'y_a50f_' + startTime + '_' + endTime
