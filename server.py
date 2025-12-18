@@ -204,10 +204,10 @@ def train():
         
         print(f"收到训练请求，文件: {filename}")
         
-        # 获取训练参数（可选）
-        startTime = request.form.get('startTime', '0400')
-        endTime = request.form.get('endTime', 'mid')
-        unbalance_ratio = float(request.form.get('unbalance_ratio', 5))  # 保留参数以保持向后兼容，但不再使用
+        # 获取训练参数（强制固定为 0400-mid，防止被前端参数覆盖）
+        startTime = '0400'
+        endTime = 'mid'
+        unbalance_ratio = 5.0  # 保留占位，不再从外部读取
         
         # 训练模型
         print("开始训练模型...")
