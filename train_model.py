@@ -128,7 +128,7 @@ class XYZ_Meta():
             sharpe_per_trade = 0
             win_rate = 0
             
-        percent_of_trade = len(sequence1) / len(sequence)
+        percent_of_trade = len(sequence1) / len(sequence) 
         
         # 返回字典以保持向后兼容（供server.py使用）
         return {
