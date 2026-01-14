@@ -20,6 +20,23 @@ import time
 # 导入训练模块
 from train_model import train_models_from_excel
 
+# 导入数据预测模块（从 new file 目录）
+import sys
+import importlib.util
+new_file_path = os.path.join(os.path.dirname(__file__), 'new file', 'data predict.py')
+spec = importlib.util.spec_from_file_location("data_predict", new_file_path)
+data_predict_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(data_predict_module)
+
+# 导入需要的函数和类
+DataCollector = data_predict_module.DataCollector
+get_usdcnh_data = data_predict_module.get_usdcnh_data
+get_xina50_data = data_predict_module.get_xina50_data
+get_hs300_data = data_predict_module.get_hs300_data
+calculate_parameters = data_predict_module.calculate_parameters
+load_trading_model = data_predict_module.load_trading_model
+predict_signal_with_debug = data_predict_module.predict_signal_with_debug
+
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求
 
@@ -332,6 +349,121 @@ def get_logs():
         records = records[:limit]
     return jsonify({"logs": records, "date": date_str}), 200
 
+@app.route('/predict_auto', methods=['POST'])
+def predict_auto():
+    """自动预测接口：接收日期和合约月份，自动下载数据、计算参数并预测"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': '请求格式错误'}), 400
+        
+        # 验证必需参数
+        day1_date = data.get('day1_date', '').strip()
+        day2_date = data.get('day2_date', '').strip()
+        day3_date = data.get('day3_date', '').strip()
+        contract_month = data.get('contract_month', '').strip()
+        
+        if not all([day1_date, day2_date, day3_date, contract_month]):
+            return jsonify({'error': '缺少必需参数：day1_date, day2_date, day3_date, contract_month'}), 400
+        
+        # 验证日期格式
+        try:
+            from datetime import datetime
+            datetime.strptime(day1_date, "%Y%m%d")
+            datetime.strptime(day2_date, "%Y%m%d")
+            datetime.strptime(day3_date, "%Y%m%d")
+            datetime.strptime(contract_month, "%Y%m")
+        except ValueError as e:
+            return jsonify({'error': f'日期格式错误，应为 YYYYMMDD 或 YYYYMM: {str(e)}'}), 400
+        
+        print(f"[预测自动接口] 收到请求: day1={day1_date}, day2={day2_date}, day3={day3_date}, contract={contract_month}")
+        
+        # 创建数据收集器
+        collector = DataCollector()
+        
+        # 获取USD/CNH数据
+        print("[预测自动接口] 获取USD/CNH数据...")
+        get_usdcnh_data(collector, day2_date, '15:00:00')
+        get_usdcnh_data(collector, day3_date, '04:00:00')
+        
+        # 获取XINA50数据
+        print("[预测自动接口] 获取XINA50数据...")
+        get_xina50_data(collector, day2_date, '15:00:00', contract_month)
+        get_xina50_data(collector, day3_date, '04:00:00', contract_month)
+        
+        # 获取HS300数据
+        print("[预测自动接口] 获取HS300数据...")
+        get_hs300_data(collector, day1_date, day2_date)
+        
+        # 计算参数
+        print("[预测自动接口] 计算参数...")
+        parameters = calculate_parameters(collector, day1_date, day2_date, day3_date)
+        
+        # 检查参数是否完整
+        if not all(key in parameters for key in ['W1', 'W2', 'W3', 'W4']):
+            missing_params = [key for key in ['W1', 'W2', 'W3', 'W4'] if key not in parameters]
+            return jsonify({
+                'error': f'无法计算完整特征参数，缺失: {missing_params}',
+                'collected_data': collector.get_all_data(),
+                'parameters': parameters
+            }), 400
+        
+        # 准备特征
+        features = [float(parameters['W1']), float(parameters['W2']), float(parameters['W3']), float(parameters['W4'])]
+        
+        # 加载模型
+        model_dict_local = load_trading_model()
+        if not model_dict_local:
+            return jsonify({'error': '模型未加载，请先训练模型'}), 500
+        
+        # 进行预测（使用 predict_signal_with_debug 但需要修改返回格式）
+        # 先使用现有的 predict_signal 函数
+        if not load_models(force_reload=False):
+            return jsonify({'error': '模型未加载，请先训练模型'}), 500
+        
+        # 使用全局 model_dict 进行预测
+        result = predict_signal(features)
+        
+        # 记录日志（使用计算出的参数作为 factors）
+        factors_for_log = [
+            {'name': 'W1', 'value': str(parameters['W1'])},
+            {'name': 'W2', 'value': str(parameters['W2'])},
+            {'name': 'W3', 'value': str(parameters['W3'])},
+            {'name': 'W4', 'value': str(parameters['W4'])}
+        ]
+        append_predict_log(factors=factors_for_log, result=result, request_obj=request)
+        
+        # 返回结果
+        return jsonify({
+            'decision': result['decision'],
+            'prob_long_lgbm': result['prob_long_lgbm'],
+            'prob_short_lgbm': result['prob_short_lgbm'],
+            'prob_long_ksvm': result['prob_long_ksvm'],
+            'prob_short_ksvm': result['prob_short_ksvm'],
+            'threshold_long_lgbm': result['threshold_long_lgbm'],
+            'threshold_short_lgbm': result['threshold_short_lgbm'],
+            'threshold_long_ksvm': result['threshold_long_ksvm'],
+            'threshold_short_ksvm': result['threshold_short_ksvm'],
+            'long_decision_lgbm': result['long_decision_lgbm'],
+            'short_decision_lgbm': result['short_decision_lgbm'],
+            'long_decision_ksvm': result['long_decision_ksvm'],
+            'short_decision_ksvm': result['short_decision_ksvm'],
+            'parameters': {
+                'W1': str(parameters['W1']),
+                'W2': str(parameters['W2']),
+                'W3': str(parameters['W3']),
+                'W4': str(parameters['W4'])
+            },
+            'collected_data': collector.get_all_data()
+        }), 200
+        
+    except Exception as e:
+        print(f"自动预测时出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'服务器内部错误: {str(e)}'}), 500
+
 @app.route('/health', methods=['GET'])
 def health():
     """健康检查接口"""
@@ -355,9 +487,11 @@ if __name__ == '__main__':
     print("=" * 60)
     print("服务器启动在 http://127.0.0.1:8000")
     print("API 接口:")
-    print("  - POST /train    : 上传Excel文件训练模型")
-    print("  - POST /predict  : 预测交易信号")
-    print("  - GET  /health   : 健康检查")
+    print("  - POST /train        : 上传Excel文件训练模型")
+    print("  - POST /predict      : 预测交易信号（手动输入参数）")
+    print("  - POST /predict_auto : 自动预测（输入日期和合约月份）")
+    print("  - GET  /health       : 健康检查")
+    print("  - GET  /logs         : 获取预测日志")
     print("=" * 60)
     
     app.run(host='127.0.0.1', port=8000, debug=True)

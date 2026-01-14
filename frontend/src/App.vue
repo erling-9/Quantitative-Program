@@ -83,38 +83,81 @@
     <!-- 信号预测区域 -->
     <section class="card">
       <h2>2. 信号预测 (Signal Prediction)</h2>
-      <p class="section-desc">输入四个关键因子，获取交易信号 (Input 4 factors to get signal)</p>
+      <p class="section-desc">输入日期和合约月份，自动下载数据并预测 (Input dates and contract month to auto predict)</p>
       
       <form @submit.prevent="handleSubmit" class="form">
-        <label
-          v-for="field in fields"
-          :key="field.key"
-          class="form-field"
-        >
-          <span class="label">
-            {{ field.label }}
-            <small>({{ field.key }})</small>
-          </span>
+        <div class="form-field">
+          <label class="label">
+            前一日 (day1) 日期
+            <small>(格式: YYYYMMDD，例如: 20251231)</small>
+          </label>
           <input
-            v-model.number="factors[field.key]"
-            type="number"
-            step="0.0000000001"
+            v-model="predictionParams.day1_date"
+            type="text"
+            pattern="[0-9]{8}"
+            placeholder="20251231"
             required
-            :disabled="!models_loaded"
+            :disabled="isLoading"
+            maxlength="8"
           />
-        </label>
+        </div>
+
+        <div class="form-field">
+          <label class="label">
+            当日 (day2) 日期
+            <small>(格式: YYYYMMDD，例如: 20260105)</small>
+          </label>
+          <input
+            v-model="predictionParams.day2_date"
+            type="text"
+            pattern="[0-9]{8}"
+            placeholder="20260105"
+            required
+            :disabled="isLoading"
+            maxlength="8"
+          />
+        </div>
+
+        <div class="form-field">
+          <label class="label">
+            下一日 (day3) 日期
+            <small>(格式: YYYYMMDD，例如: 20260106)</small>
+          </label>
+          <input
+            v-model="predictionParams.day3_date"
+            type="text"
+            pattern="[0-9]{8}"
+            placeholder="20260106"
+            required
+            :disabled="isLoading"
+            maxlength="8"
+          />
+        </div>
+
+        <div class="form-field">
+          <label class="label">
+            XINA50合约月份
+            <small>(格式: YYYYMM，例如: 202601)</small>
+          </label>
+          <input
+            v-model="predictionParams.contract_month"
+            type="text"
+            pattern="[0-9]{6}"
+            placeholder="202601"
+            required
+            :disabled="isLoading"
+            maxlength="6"
+          />
+        </div>
 
         <div v-if="!models_loaded" class="warning">
           <p>⚠️ 模型未加载，请先训练模型 (Model not loaded, please train first)</p>
         </div>
 
         <div class="actions">
-          <button type="button" class="ghost" @click="fillExample" :disabled="!models_loaded">
-            使用示例数据 (Use sample)
-          </button>
           <button type="submit" :disabled="isLoading || !models_loaded">
             <span v-if="isLoading" class="loader"></span>
-            <span v-else>计算信号 (Predict)</span>
+            <span v-else>自动预测 (Auto Predict)</span>
           </button>
         </div>
       </form>
@@ -194,20 +237,20 @@ import axios from 'axios';
 const endpoint = import.meta.env.VITE_SIGNAL_ENDPOINT || 'http://127.0.0.1:8000';
 const trainEndpoint = `${endpoint}/train`;
 const predictEndpoint = `${endpoint}/predict`;
+const predictAutoEndpoint = `${endpoint}/predict_auto`;
 const healthEndpoint = `${endpoint}/health`;
 const logEndpoint = `${endpoint}/logs`;
 
-const fields = [
-  { key: 'w_a50f_1500t1_0400', label: 'A50 指数动量 (A50 momentum 04:00-09:29)' },
-  { key: 'w_usdrmb_1500t1_0400_raw', label: '美元人民币动量 (USD/CNY momentum)' },
-  { key: 'w_CSI_1445t1_1500', label: '沪深300 (CSI300 14:45-15:00)' },
-  { key: 'w_CSI_1500t2_1500t1', label: '沪深300 高频差分 (CSI300 high-frequency diff)' }
-];
-
-const factors = reactive(fields.reduce((acc, field) => {
-  acc[field.key] = null;
-  return acc;
-}, {}));
+const predictionParams = reactive({
+  day1_date: '',
+  day2_date: '',
+  day3_date: '',
+  contract_month: '',
+  day2_time_1500: '15:00:00',
+  day3_time_0400: '04:00:00',
+  day2_time_1445: '14:45:00',
+  day1_time_1500: '15:00:00'
+});
 
 const formatTime = (ts) => {
   try {
@@ -339,8 +382,8 @@ const resultLabel = computed(() => {
 
 const resultDetails = computed(() => {
   if (!result.value) return {};
-  const { decision, ...rest } = result.value;
-  return {
+  const { decision, parameters, ...rest } = result.value;
+  const details = {
     '决策权重 (Decision weight)': decision,
     'LGBM看多概率 (Long prob)': (rest.prob_long_lgbm * 100).toFixed(2) + '%',
     'LGBM阈值 (Long threshold)': Number(rest.threshold_long_lgbm)?.toFixed(10),
@@ -351,28 +394,30 @@ const resultDetails = computed(() => {
     'KSVM看空概率 (Short prob)': (rest.prob_short_ksvm * 100).toFixed(2) + '%',
     'KSVM阈值 (Short threshold)': Number(rest.threshold_short_ksvm)?.toFixed(10),
   };
+  
+  // 如果有计算出的参数，添加到详情中
+  if (parameters) {
+    details['计算参数 W1'] = parameters.W1;
+    details['计算参数 W2'] = parameters.W2;
+    details['计算参数 W3'] = parameters.W3;
+    details['计算参数 W4'] = parameters.W4;
+  }
+  
+  return details;
 });
-
-const payload = () => ({
-  factors: fields.map(field => ({
-    name: field.key,
-    value: Number(factors[field.key])
-  }))
-});
-
-const fillExample = () => {
-  const example = [0.0062871234, -0.0003519876, -0.0014854567, 0.0018532468];
-  fields.forEach((field, idx) => {
-    factors[field.key] = Number(example[idx].toFixed(10));
-  });
-};
 
 const validate = () => {
-  for (const field of fields) {
-    const value = factors[field.key];
-    if (value === null || Number.isNaN(value)) {
-      return `请输入 ${field.label} / Please enter ${field.label}`;
-    }
+  if (!predictionParams.day1_date || !/^\d{8}$/.test(predictionParams.day1_date)) {
+    return '前一日日期格式错误，应为8位数字 (YYYYMMDD)';
+  }
+  if (!predictionParams.day2_date || !/^\d{8}$/.test(predictionParams.day2_date)) {
+    return '当日日期格式错误，应为8位数字 (YYYYMMDD)';
+  }
+  if (!predictionParams.day3_date || !/^\d{8}$/.test(predictionParams.day3_date)) {
+    return '下一日日期格式错误，应为8位数字 (YYYYMMDD)';
+  }
+  if (!predictionParams.contract_month || !/^\d{6}$/.test(predictionParams.contract_month)) {
+    return '合约月份格式错误，应为6位数字 (YYYYMM)';
   }
   return '';
 };
@@ -388,7 +433,14 @@ const handleSubmit = async () => {
 
   isLoading.value = true;
   try {
-    const response = await axios.post(predictEndpoint, payload());
+    const response = await axios.post(predictAutoEndpoint, {
+      day1_date: predictionParams.day1_date,
+      day2_date: predictionParams.day2_date,
+      day3_date: predictionParams.day3_date,
+      contract_month: predictionParams.contract_month
+    }, {
+      timeout: 300000 // 5分钟超时，因为需要下载数据
+    });
     result.value = response.data;
     // 刷新当日日志
     fetchLogs();

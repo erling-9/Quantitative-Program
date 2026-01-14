@@ -69,6 +69,15 @@ class ForexApp(EWrapper, EClient):
         EClient.__init__(self, self)
         self.data_ready = threading.Event()
         self.all_data = []
+        self.connection_error = None
+
+    def error(self, reqId, errorCode, errorString, advancedOrderRejectJson=""):
+        """捕获 IB API 错误"""
+        if errorCode == 502:  # 连接错误
+            self.connection_error = f"无法连接到 TWS/Gateway: {errorString}"
+        elif errorCode == 504:  # 未连接
+            self.connection_error = f"未连接到 TWS/Gateway: {errorString}"
+        # 不打印错误，由调用者处理
 
     def historicalData(self, reqId, bar):
         self.all_data.append(bar)
@@ -83,9 +92,43 @@ def get_usdcnh_data(collector, target_date, target_time):
     # 创建连接
     app = ForexApp()
     try:
-        app.connect('127.0.0.1', 7496, clientId=1)
+        try:
+            app.connect('127.0.0.1', 7496, clientId=1)
+        except Exception as conn_err:
+            print(f"  ✗ 无法连接到 IB TWS/Gateway: {conn_err}")
+            print(f"  请确保:")
+            print(f"    1. IB TWS 或 IB Gateway 已启动")
+            print(f"    2. 在 TWS 中已启用 API 设置 (Edit → Global Configuration → API → Settings)")
+            print(f"    3. Socket port 设置为 7496 (实盘) 或 7497 (模拟)")
+            return None
         threading.Thread(target=app.run, daemon=True).start()
-        time.sleep(2)
+        time.sleep(3)  # 增加等待时间，确保连接建立
+        
+        # 检查连接错误和连接状态
+        if app.connection_error:
+            print(f"  ✗ {app.connection_error}")
+            print(f"  请确保:")
+            print(f"    1. IB TWS 或 IB Gateway 已启动")
+            print(f"    2. 在 TWS 中已启用 API 设置 (Edit → Global Configuration → API → Settings)")
+            print(f"    3. Socket port 设置为 7496 (实盘) 或 7497 (模拟)")
+            try:
+                app.disconnect()
+            except:
+                pass
+            return None
+        
+        # 检查是否真的连接成功
+        if not app.isConnected():
+            print(f"  ✗ 连接失败: 无法连接到 IB TWS/Gateway")
+            print(f"  请确保:")
+            print(f"    1. IB TWS 或 IB Gateway 已启动")
+            print(f"    2. 在 TWS 中已启用 API 设置 (Edit → Global Configuration → API → Settings)")
+            print(f"    3. Socket port 设置为 7496 (实盘) 或 7497 (模拟)")
+            try:
+                app.disconnect()
+            except:
+                pass
+            return None
         
         # 设置合约
         contract = Contract()
@@ -153,13 +196,53 @@ def get_usdcnh_data(collector, target_date, target_time):
     
     return None
 
-def get_xina50_data(collector, target_date, target_time):
+def get_xina50_data(collector, target_date, target_time, contract_month):
     """获取富时中国A50指数期货数据"""
     print(f"获取XINA50 {target_date} {target_time}...")
     
+    import asyncio
+    import nest_asyncio
+    
+    # 在Flask多线程环境中，允许嵌套事件循环
+    try:
+        nest_asyncio.apply()
+    except ImportError:
+        # 如果nest_asyncio未安装，尝试其他方法
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except:
+        pass
+    
     ib = IB()
     try:
-        ib.connect('127.0.0.1', 7496, clientId=2)
+        try:
+            # ib_insync会自动处理事件循环
+            ib.connect('127.0.0.1', 7496, clientId=2)
+        except Exception as conn_err:
+            error_msg = str(conn_err)
+            if "event loop" in error_msg.lower() or "no current event loop" in error_msg.lower():
+                # 如果是事件循环错误，尝试创建新的事件循环
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    ib.connect('127.0.0.1', 7496, clientId=2)
+                except Exception as e2:
+                    print(f"  ✗ 无法连接到 IB TWS/Gateway: {e2}")
+                    print(f"  请确保:")
+                    print(f"    1. IB TWS 或 IB Gateway 已启动")
+                    print(f"    2. 在 TWS 中已启用 API 设置 (Edit → Global Configuration → API → Settings)")
+                    print(f"    3. Socket port 设置为 7496 (实盘) 或 7497 (模拟)")
+                    return None
+            else:
+                print(f"  ✗ 无法连接到 IB TWS/Gateway: {conn_err}")
+                print(f"  请确保:")
+                print(f"    1. IB TWS 或 IB Gateway 已启动")
+                print(f"    2. 在 TWS 中已启用 API 设置 (Edit → Global Configuration → API → Settings)")
+                print(f"    3. Socket port 设置为 7496 (实盘) 或 7497 (模拟)")
+                return None
     except Exception as e:
         print(f"  ✗ 连接失败: {e}")
         return None
@@ -171,7 +254,7 @@ def get_xina50_data(collector, target_date, target_time):
         contract.secType = 'FUT'
         contract.exchange = 'SGX'
         contract.currency = 'USD'
-        contract.lastTradeDateOrContractMonth = XINA50_CONTRACT_MONTH
+        contract.lastTradeDateOrContractMonth = contract_month
         
         # 解析目标时间
         date_obj = datetime.datetime.strptime(target_date, "%Y%m%d")
@@ -419,14 +502,15 @@ def predict_signal_with_debug(features, model_dict):
 
     return decision
 
-def main(day1_date, day2_date, day3_date):
-    """主程序 - 手动指定三个日期"""
+def main(day1_date, day2_date, day3_date, contract_month):
+    """主程序 - 手动指定三个日期和合约月份"""
     print(f"{'='*50}")
     print("数据收集 - 手动指定日期")
     print(f"{'='*50}")
     print(f"前一日 (day1): {day1_date}")
     print(f"当日 (day2): {day2_date}")
     print(f"下一日 (day3): {day3_date}")
+    print(f"合约月份: {contract_month}")
     print(f"{'='*50}")
     
     # 创建数据收集器
@@ -439,8 +523,8 @@ def main(day1_date, day2_date, day3_date):
     
     # 获取XINA50数据
     print(f"\n2. XINA50数据:")
-    get_xina50_data(collector, day2_date, '15:00:00')  # 当日15:00
-    get_xina50_data(collector, day3_date, '04:00:00')  # 次日04:00
+    get_xina50_data(collector, day2_date, '15:00:00', contract_month)  # 当日15:00
+    get_xina50_data(collector, day3_date, '04:00:00', contract_month)  # 次日04:00
     
     # 获取HS300数据
     print(f"\n3. HS300数据:")
@@ -506,15 +590,72 @@ def main(day1_date, day2_date, day3_date):
     
     print(f"\n程序执行完成!")
 
-# ===== 可配置区域 =====
-# 日期设置：前一日(day1)，当日(day2)，下一日(day3)，格式 YYYYMMDD
-DAY1_DATE = "20251231"
-DAY2_DATE = "20260105"
-DAY3_DATE = "20260106"
-
-# XINA50 合约月份（格式 YYYYMM）
-XINA50_CONTRACT_MONTH = "202601"
+def get_user_input():
+    """获取用户输入的日期和合约月份"""
+    print("=" * 60)
+    print("请输入预测参数")
+    print("=" * 60)
+    
+    # 输入三个日期
+    while True:
+        day1_date = input("请输入前一日 (day1) 日期 (格式: YYYYMMDD，例如: 20251231): ").strip()
+        if len(day1_date) == 8 and day1_date.isdigit():
+            try:
+                datetime.datetime.strptime(day1_date, "%Y%m%d")
+                break
+            except ValueError:
+                print("✗ 日期格式错误，请重新输入")
+        else:
+            print("✗ 日期格式错误，请输入8位数字 (YYYYMMDD)")
+    
+    while True:
+        day2_date = input("请输入当日 (day2) 日期 (格式: YYYYMMDD，例如: 20260105): ").strip()
+        if len(day2_date) == 8 and day2_date.isdigit():
+            try:
+                datetime.datetime.strptime(day2_date, "%Y%m%d")
+                break
+            except ValueError:
+                print("✗ 日期格式错误，请重新输入")
+        else:
+            print("✗ 日期格式错误，请输入8位数字 (YYYYMMDD)")
+    
+    while True:
+        day3_date = input("请输入下一日 (day3) 日期 (格式: YYYYMMDD，例如: 20260106): ").strip()
+        if len(day3_date) == 8 and day3_date.isdigit():
+            try:
+                datetime.datetime.strptime(day3_date, "%Y%m%d")
+                break
+            except ValueError:
+                print("✗ 日期格式错误，请重新输入")
+        else:
+            print("✗ 日期格式错误，请输入8位数字 (YYYYMMDD)")
+    
+    # 输入合约月份
+    while True:
+        contract_month = input("请输入XINA50合约月份 (格式: YYYYMM，例如: 202601): ").strip()
+        if len(contract_month) == 6 and contract_month.isdigit():
+            try:
+                datetime.datetime.strptime(contract_month, "%Y%m")
+                break
+            except ValueError:
+                print("✗ 合约月份格式错误，请重新输入")
+        else:
+            print("✗ 合约月份格式错误，请输入6位数字 (YYYYMM)")
+    
+    print("\n" + "=" * 60)
+    print("输入确认:")
+    print(f"  前一日 (day1): {day1_date}")
+    print(f"  当日 (day2): {day2_date}")
+    print(f"  下一日 (day3): {day3_date}")
+    print(f"  合约月份: {contract_month}")
+    print("=" * 60)
+    
+    return day1_date, day2_date, day3_date, contract_month
 
 
 if __name__ == "__main__":
-    main(DAY1_DATE, DAY2_DATE, DAY3_DATE)
+    # 获取用户输入
+    day1_date, day2_date, day3_date, contract_month = get_user_input()
+    
+    # 运行主程序
+    main(day1_date, day2_date, day3_date, contract_month)
